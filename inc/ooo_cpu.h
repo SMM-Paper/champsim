@@ -4,13 +4,13 @@
 #include <array>
 #include <queue>
 #include <functional>
+#include <optional>
 #include <queue>
 
 #include "champsim_constants.h"
 #include "delay_queue.hpp"
 #include "instruction.h"
 #include "cache.h"
-#include "instruction.h"
 #include "operable.h"
 #include "ptw.h"
 
@@ -50,6 +50,10 @@ class O3_CPU : public champsim::operable {
     using dib_t= std::vector<dib_entry_t>;
     const std::size_t dib_set, dib_way, dib_window;
     dib_t DIB{dib_set*dib_way};
+
+    // A map from register indices to the instruction (in the ROB) which is producing its value
+    std::array<std::optional<champsim::circular_buffer<ooo_model_instr>::iterator>, std::numeric_limits<uint8_t>::max()+1> producers;
+    decltype(producers)::value_type get_producer(std::size_t x) { return producers[x]; }
 
     // reorder buffer, load/store queue, register file
     champsim::circular_buffer<ooo_model_instr> IFETCH_BUFFER;

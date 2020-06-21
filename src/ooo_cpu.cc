@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <iostream>
 #include <vector>
 
 #include "ooo_cpu.h"
@@ -57,40 +58,17 @@ void O3_CPU::init_instruction(ooo_model_instr arch_instr)
 
     // first, read PIN trace
 
-    arch_instr.instr_id = instr_unique_id;
+    arch_instr.instr_id = instr_unique_id++;
 
-    bool reads_sp = false;
-    bool writes_sp = false;
-    bool reads_flags = false;
-    bool reads_ip = false;
-    bool writes_ip = false;
-    bool reads_other = false;
+    bool reads_sp = std::count(std::begin(arch_instr.source_registers), std::end(arch_instr.source_registers), REG_STACK_POINTER);
+    bool writes_sp = std::count(std::begin(arch_instr.destination_registers), std::end(arch_instr.destination_registers), REG_STACK_POINTER);
+    bool reads_flags = std::count(std::begin(arch_instr.source_registers), std::end(arch_instr.source_registers), REG_FLAGS);
+    bool reads_ip = std::count(std::begin(arch_instr.source_registers), std::end(arch_instr.source_registers), REG_INSTRUCTION_POINTER);
+    bool writes_ip = std::count(std::begin(arch_instr.destination_registers), std::end(arch_instr.destination_registers), REG_INSTRUCTION_POINTER);
+    bool reads_other = std::count_if(std::begin(arch_instr.source_registers), std::end(arch_instr.source_registers), [](uint8_t x){ return x != REG_STACK_POINTER && x != REG_FLAGS && x != REG_INSTRUCTION_POINTER; });
 
     for (uint32_t i=0; i<MAX_INSTR_DESTINATIONS; i++)
     {
-        switch(arch_instr.destination_registers[i])
-        {
-            case 0:
-                break;
-            case REG_STACK_POINTER:
-                writes_sp = true;
-                break;
-            case REG_INSTRUCTION_POINTER:
-                writes_ip = true;
-                break;
-            default:
-                break;
-        }
-
-        /*
-           if((arch_instr.is_branch) && (arch_instr.destination_registers[i] > 24) && (arch_instr.destination_registers[i] < 28))
-           {
-           arch_instr.destination_registers[i] = 0;
-           }
-           */
-
-        if (arch_instr.destination_registers[i])
-            arch_instr.num_reg_ops++;
         if (arch_instr.destination_memory[i])
         {
             arch_instr.num_mem_ops++;
@@ -101,46 +79,10 @@ void O3_CPU::init_instruction(ooo_model_instr arch_instr)
 #ifdef SANITY_CHECK
                 assert(STA.size() < ROB.size()*NUM_INSTR_DESTINATIONS_SPARC);
 #endif
-                STA.push(instr_unique_id);
+                STA.push(arch_instr.instr_id);
             }
         }
     }
-
-    for (int i=0; i<NUM_INSTR_SOURCES; i++)
-    {
-        switch(arch_instr.source_registers[i])
-        {
-            case 0:
-                break;
-            case REG_STACK_POINTER:
-                reads_sp = true;
-                break;
-            case REG_FLAGS:
-                reads_flags = true;
-                break;
-            case REG_INSTRUCTION_POINTER:
-                reads_ip = true;
-                break;
-            default:
-                reads_other = true;
-                break;
-        }
-
-        /*
-           if((!arch_instr.is_branch) && (arch_instr.source_registers[i] > 25) && (arch_instr.source_registers[i] < 28))
-           {
-           arch_instr.source_registers[i] = 0;
-           }
-           */
-
-        if (arch_instr.source_registers[i])
-            arch_instr.num_reg_ops++;
-        if (arch_instr.source_memory[i])
-            arch_instr.num_mem_ops++;
-    }
-
-    if (arch_instr.num_mem_ops > 0)
-        arch_instr.is_memory = 1;
 
     // determine what kind of branch this is, if any
     if(!reads_sp && !reads_flags && writes_ip && !reads_other)
@@ -207,32 +149,23 @@ void O3_CPU::init_instruction(ooo_model_instr arch_instr)
     // waiting for the stack pointer's dependency chain to be resolved.
     // We're doing it here because we already have writes_sp and reads_other handy,
     // and in ChampSim it doesn't matter where before execution you do it.
-    if(writes_sp)
-      {
-       // Avoid creating register dependencies on the stack pointer for calls, returns, pushes,
-       // and pops, but not for variable-sized changes in the stack pointer position.
-       // reads_other indicates that the stack pointer is being changed by a variable amount,
-       // which can't be determined before execution.
-       if((arch_instr.is_branch != 0) || (arch_instr.num_mem_ops > 0) || (!reads_other))
-         {
-           for (uint32_t i=0; i<MAX_INSTR_DESTINATIONS; i++)
-             {
-               if(arch_instr.destination_registers[i] == REG_STACK_POINTER)
-                 {
-                   arch_instr.destination_registers[i] = 0;
-                   arch_instr.num_reg_ops--;
-                 }
-             }
-         }
-      }
+    // Avoid creating register dependencies on the stack pointer for calls, returns, pushes,
+    // and pops, but not for variable-sized changes in the stack pointer position.
+    // reads_other indicates that the stack pointer is being changed by a variable amount,
+    // which can't be determined before execution.
+    if (writes_sp && ((arch_instr.is_branch != 0) || (arch_instr.num_mem_ops > 0) || (!reads_other)))
+    {
+        auto sp = std::find(std::begin(arch_instr.destination_registers), std::end(arch_instr.destination_registers), REG_STACK_POINTER);
+        if (sp != std::end(arch_instr.destination_registers))
+            arch_instr.destination_registers.erase(sp);
+    }
 
-    // add this instruction to the IFETCH_BUFFER
 
     // handle branch prediction
     if (arch_instr.is_branch) {
 
         DP( if (warmup_complete[cpu]) {
-                cout << "[BRANCH] instr_id: " << instr_unique_id << " ip: " << hex << arch_instr.ip << dec << " taken: " << +arch_instr.branch_taken << endl; });
+                cout << "[BRANCH] instr_id: " << arch_instr.instr_id << " ip: " << hex << arch_instr.ip << dec << " taken: " << +arch_instr.branch_taken << endl; });
 
         num_branch++;
 
@@ -279,21 +212,17 @@ void O3_CPU::init_instruction(ooo_model_instr arch_instr)
     // branch predictor, cache contents, and prefetchers are still warmed up
     if(!warmup_complete[cpu])
       {
-	for (int i=0; i<NUM_INSTR_SOURCES; i++)
-	  {
-	    arch_instr.source_registers[i] = 0;
-	  }
-	for (uint32_t i=0; i<MAX_INSTR_DESTINATIONS; i++)
-	  {
-	    arch_instr.destination_registers[i] = 0;
-	  }
-	arch_instr.num_reg_ops = 0;
+          arch_instr.source_registers.clear();
+          //arch_instr.destination_registers.clear();
       }
+
+    arch_instr.num_reg_ops = (/*arch_instr.destination_registers.size() +*/ arch_instr.source_registers.size());
+
+    if (arch_instr.num_mem_ops > 0)
+        arch_instr.is_memory = 1;
 
     // Add to IFETCH_BUFFER
     IFETCH_BUFFER.push_back(arch_instr);
-
-    instr_unique_id++;
 }
 
 void O3_CPU::check_dib()
@@ -554,32 +483,51 @@ void O3_CPU::schedule_instruction()
     }
 }
 
-struct instr_reg_will_produce
-{
-    const uint8_t match_reg;
-    explicit instr_reg_will_produce(uint8_t reg) : match_reg(reg) {}
-    bool operator() (const ooo_model_instr &test) const
-    {
-        auto dreg_begin = std::begin(test.destination_registers);
-        auto dreg_end   = std::end(test.destination_registers);
-        return test.executed != COMPLETED && std::find(dreg_begin, dreg_end, match_reg) != dreg_end;
-    }
-};
-
 void O3_CPU::do_scheduling(champsim::circular_buffer<ooo_model_instr>::iterator rob_it)
 {
-    // Mark register dependencies
-    for (auto src_reg : rob_it->source_registers) {
-        if (src_reg) {
-            champsim::circular_buffer<ooo_model_instr>::reverse_iterator prior{rob_it};
-            prior = std::find_if(prior, ROB.rend(), instr_reg_will_produce(src_reg));
-            if (prior != ROB.rend() && (prior->registers_instrs_depend_on_me.empty() || prior->registers_instrs_depend_on_me.back() != rob_it))
-            {
-                prior->registers_instrs_depend_on_me.push_back(rob_it);
-                rob_it->num_reg_dependent++;
-            }
+    // print out source/destination registers
+    /*
+    std::cout << "[ROB] " << __func__ << " instr_id: " << rob_it->instr_id << " is_memory: " << +rob_it->is_memory << std::endl;
+    std::cout << "    load reg_index:";
+    for (uint8_t reg : rob_it->source_registers) {
+        std::cout << " "<< (int)reg;
+    }
+    std::cout << std::endl;
+
+    std::cout << "    load dep:";
+    */
+    for (uint8_t s_reg : rob_it->source_registers)
+    {
+        if (producers[s_reg].has_value() && (std::empty((*producers[s_reg])->registers_instrs_depend_on_me) || (*producers[s_reg])->registers_instrs_depend_on_me.back() != rob_it))
+        {
+            //std::cout << " " << (*producers[s_reg])->instr_id;
+            (*producers[s_reg])->registers_instrs_depend_on_me.push_back(rob_it);
+            rob_it->num_reg_dependent++;
         }
     }
+    std::cout << std::endl;
+
+    /*
+    std::vector<decltype(producers)::value_type> prod;
+    std::transform(std::begin(rob_it->source_registers), std::end(rob_it->source_registers), std::back_inserter(prod), std::bind(&O3_CPU::get_producer, this, std::placeholders::_1));
+    auto rem_end = std::remove_if(std::begin(prod), std::end(prod), [](auto x){ return x.has_value(); });
+
+    rob_it->num_reg_dependent = std::distance(std::begin(prod), rem_end);
+
+    std::sort(std::begin(prod), rem_end);
+    auto uniq_end = std::unique(std::begin(prod), rem_end);
+
+    std::for_each(std::begin(prod), uniq_end, [rob_it](auto x){ (*x)->registers_instrs_depend_on_me.push_back(rob_it); });
+    */
+
+    //std::cout << " store reg_index:";
+    //for (uint8_t reg : rob_it->destination_registers) {
+        //std::cout << " " << (int)reg;
+    //}
+    //std::cout << std::endl;
+
+    for (uint8_t d_reg : rob_it->destination_registers)
+        producers[d_reg] = rob_it;
 
     if (rob_it->is_memory)
         rob_it->scheduled = INFLIGHT;
@@ -970,6 +918,10 @@ int O3_CPU::execute_load(std::vector<LSQ_ENTRY>::iterator lq_it)
 
 void O3_CPU::do_complete_execution(champsim::circular_buffer<ooo_model_instr>::iterator rob_it)
 {
+    for (uint8_t d_reg : rob_it->destination_registers)
+        if (producers[d_reg] == rob_it)
+            producers[d_reg].reset();
+
     rob_it->executed = COMPLETED;
     if (rob_it->is_memory == 0)
         inflight_reg_executions--;
@@ -990,6 +942,11 @@ void O3_CPU::do_complete_execution(champsim::circular_buffer<ooo_model_instr>::i
                 dependent->scheduled = COMPLETED;
             }
         }
+
+
+        DP (if (warmup_complete[cpu]) {
+                std::cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry.at(rob_index).instr_id << " releases instr_id: ";
+                std::cout << dependent->instr_id << " num_reg_dependent: " << dependent->num_reg_dependent << " cycle: " << current_core_cycle[cpu] << std::endl; });
     }
 
     if (rob_it->branch_mispredicted)
