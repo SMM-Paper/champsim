@@ -943,7 +943,6 @@ void O3_CPU::do_complete_execution(champsim::circular_buffer<ooo_model_instr>::i
             }
         }
 
-
         DP (if (warmup_complete[cpu]) {
                 std::cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry.at(rob_index).instr_id << " releases instr_id: ";
                 std::cout << dependent->instr_id << " num_reg_dependent: " << dependent->num_reg_dependent << " cycle: " << current_core_cycle[cpu] << std::endl; });
