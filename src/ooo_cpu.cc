@@ -498,14 +498,14 @@ void O3_CPU::do_scheduling(champsim::circular_buffer<ooo_model_instr>::iterator 
     */
     for (uint8_t s_reg : rob_it->source_registers)
     {
-        if (producers[s_reg].has_value() && (std::empty((*producers[s_reg])->registers_instrs_depend_on_me) || (*producers[s_reg])->registers_instrs_depend_on_me.back() != rob_it))
+        if (producers[s_reg].has_value())
         {
             //std::cout << " " << (*producers[s_reg])->instr_id;
             (*producers[s_reg])->registers_instrs_depend_on_me.push_back(rob_it);
             rob_it->num_reg_dependent++;
         }
     }
-    std::cout << std::endl;
+    //std::cout << std::endl;
 
     /*
     std::vector<decltype(producers)::value_type> prod;
@@ -962,6 +962,10 @@ void O3_CPU::complete_inflight_instruction()
         {
             if ((rob_it->executed == INFLIGHT) && (rob_it->event_cycle <= current_cycle) && rob_it->num_mem_ops == 0)
             {
+                auto end = std::end(rob_it->registers_instrs_depend_on_me);
+                auto uniq_end = std::unique(std::begin(rob_it->registers_instrs_depend_on_me), end);
+                rob_it->registers_instrs_depend_on_me.erase(uniq_end, end);
+
                 do_complete_execution(rob_it);
                 --complete_bw;
 
