@@ -485,49 +485,16 @@ void O3_CPU::schedule_instruction()
 
 void O3_CPU::do_scheduling(champsim::circular_buffer<ooo_model_instr>::iterator rob_it)
 {
-    // print out source/destination registers
-    /*
-    std::cout << "[ROB] " << __func__ << " instr_id: " << rob_it->instr_id << " is_memory: " << +rob_it->is_memory << std::endl;
-    std::cout << "    load reg_index:";
-    for (uint8_t reg : rob_it->source_registers) {
-        std::cout << " "<< (int)reg;
-    }
-    std::cout << std::endl;
-
-    std::cout << "    load dep:";
-    */
-    for (uint8_t s_reg : rob_it->source_registers)
+    // Mark register dependencies
+    for (auto sreg : rob_it->source_registers)
     {
-        if (producers[s_reg].has_value())
-        {
-            //std::cout << " " << (*producers[s_reg])->instr_id;
-            (*producers[s_reg])->registers_instrs_depend_on_me.push_back(rob_it);
-            rob_it->num_reg_dependent++;
-        }
+        rob_it->num_reg_dependent += producers.count(sreg);
+        auto [begin, end] = producers.equal_range(sreg);
+        std::for_each(begin, end, [rob_it](auto x){ x.second->registers_instrs_depend_on_me.push_back(rob_it); });
     }
-    //std::cout << std::endl;
 
-    /*
-    std::vector<decltype(producers)::value_type> prod;
-    std::transform(std::begin(rob_it->source_registers), std::end(rob_it->source_registers), std::back_inserter(prod), std::bind(&O3_CPU::get_producer, this, std::placeholders::_1));
-    auto rem_end = std::remove_if(std::begin(prod), std::end(prod), [](auto x){ return x.has_value(); });
-
-    rob_it->num_reg_dependent = std::distance(std::begin(prod), rem_end);
-
-    std::sort(std::begin(prod), rem_end);
-    auto uniq_end = std::unique(std::begin(prod), rem_end);
-
-    std::for_each(std::begin(prod), uniq_end, [rob_it](auto x){ (*x)->registers_instrs_depend_on_me.push_back(rob_it); });
-    */
-
-    //std::cout << " store reg_index:";
-    //for (uint8_t reg : rob_it->destination_registers) {
-        //std::cout << " " << (int)reg;
-    //}
-    //std::cout << std::endl;
-
-    for (uint8_t d_reg : rob_it->destination_registers)
-        producers[d_reg] = rob_it;
+    for (auto dreg : rob_it->destination_registers)
+        producers.insert({dreg, rob_it});
 
     if (rob_it->is_memory)
         rob_it->scheduled = INFLIGHT;
@@ -919,8 +886,12 @@ int O3_CPU::execute_load(std::vector<LSQ_ENTRY>::iterator lq_it)
 void O3_CPU::do_complete_execution(champsim::circular_buffer<ooo_model_instr>::iterator rob_it)
 {
     for (uint8_t d_reg : rob_it->destination_registers)
-        if (producers[d_reg] == rob_it)
-            producers[d_reg].reset();
+    {
+        auto [begin, end] = producers.equal_range(d_reg);
+        auto it = std::find_if(begin, end, [rob_it](auto x){ return x.second == rob_it; });
+        assert(it != end);
+        producers.erase(it);
+    }
 
     rob_it->executed = COMPLETED;
     if (rob_it->is_memory == 0)
