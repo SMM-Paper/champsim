@@ -401,6 +401,12 @@ int main(int argc, char** argv)
         std::cout << dram_size << " MiB";
     std::cout << " Channels: " << DRAM_CHANNELS << " Width: " << 8*DRAM_CHANNEL_WIDTH << "-bit Data Rate: " << DRAM_IO_FREQ << " MT/s" << std::endl;
 
+
+    std::cout << std::endl;
+    std::cout << "VirtualMemory physical capacity: " << std::size(vmem.ppage_free_list) * vmem.page_size;
+    std::cout << " num_ppages: " << std::size(vmem.ppage_free_list) << std::endl;
+    std::cout << "VirtualMemory page size: " << PAGE_SIZE << " log2_page_size: " << LOG2_PAGE_SIZE << std::endl;
+
     // end consequence of knobs
 
     // search through the argv for "-traces"
